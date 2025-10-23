@@ -3,13 +3,13 @@ requires = ["hatchling", "versioningit"]
 build-backend = "hatchling.build"
 
 [project]
-name = "robot_prefect"
+name = "prefect"
 dynamic = ["version"]
 description = "Workflow orchestration and management."
 readme = "README.md"
 requires-python = ">=3.9,<3.14"
 license = { text = "Apache-2.0" }
-authors = [{ name = "anilpixel", email = "eziosyanse@gmail.com" }]
+authors = [{ name = "Prefect Technologies, Inc.", email = "help@prefect.io" }]
 classifiers = [
     "Natural Language :: English",
     "Intended Audience :: Developers",
@@ -84,10 +84,10 @@ dependencies = [
     "pluggy>=1.6.0",
 ]
 [project.urls]
-Changelog = "https://github.com/anilpixel/prefect/releases"
+Changelog = "https://github.com/PrefectHQ/prefect/releases"
 Documentation = "https://docs.prefect.io"
-Source = "https://github.com/anilpixel/prefect"
-Tracker = "https://github.com/anilpixel/prefect/issues"
+Source = "https://github.com/PrefectHQ/prefect"
+Tracker = "https://github.com/PrefectHQ/prefect/issues"
 
 [project.optional-dependencies]
 otel = [
@@ -228,9 +228,6 @@ distance-dirty = "{base_version}+{distance}.{vcs}{rev}.dirty"
 
 [tool.hatch.build]
 artifacts = ["src/prefect/_build_info.py", "src/prefect/server/ui"]
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/prefect"]
 
 [tool.hatch.build.targets.sdist]
 include = ["/src/prefect", "/README.md", "/LICENSE", "/pyproject.toml"]
