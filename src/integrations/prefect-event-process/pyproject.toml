@@ -55,6 +55,7 @@ root = "../../.."
 tag_regex = "^prefect-event-process-(?P<version>\\d+\\.\\d+\\.\\d+(?:[a-zA-Z0-9]+(?:\\.[a-zA-Z0-9]+)*)?)$"
 fallback_version = "0.0.0"
 git_describe_command = 'git describe --dirty --tags --long --match "prefect-event-process-*[0-9]*"'
+local_scheme = "no-local-version"
 
 [tool.interrogate]
 ignore-init-module = true
