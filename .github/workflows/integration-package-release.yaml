@@ -7,13 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       package_name:
-        description: 'Package name (e.g., prefect-event-process)'
+        description: "Package name (e.g., prefect-event-process)"
         required: true
-        default: 'prefect-event-process'
+        default: "prefect-event-process"
       package_version:
-        description: 'Package version (e.g., 0.1.0)'
+        description: "Package version (e.g., 0.1.0)"
         required: true
-        default: '0.1.0'
+        default: "0.1.0"
 
 jobs:
   build-pypi-dists:
