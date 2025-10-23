@@ -52,9 +52,9 @@ prefect_event_process = "prefect_event_process"
 [tool.setuptools_scm]
 version_file = "prefect_event_process/_version.py"
 root = "../../.."
-tag_regex = "^prefect-event-worker-(?P<version>\\d+\\.\\d+\\.\\d+(?:[a-zA-Z0-9]+(?:\\.[a-zA-Z0-9]+)*)?)$"
+tag_regex = "^prefect-event-process-(?P<version>\\d+\\.\\d+\\.\\d+(?:[a-zA-Z0-9]+(?:\\.[a-zA-Z0-9]+)*)?)$"
 fallback_version = "0.0.0"
-git_describe_command = 'git describe --dirty --tags --long --match "prefect-event-worker-*[0-9]*"'
+git_describe_command = 'git describe --dirty --tags --long --match "prefect-event-process-*[0-9]*"'
 
 [tool.interrogate]
 ignore-init-module = true
