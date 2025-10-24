@@ -14,16 +14,14 @@ import contextlib
 import os
 import tempfile
 import threading
-import time
+import uuid
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional, TypeVar
-import uuid
-
-import diskcache
 
 import anyio
 import anyio.abc
+import diskcache
 from pydantic import Field, field_validator
 
 from prefect._internal.schemas.validators import validate_working_dir
@@ -117,11 +115,15 @@ class EventProcessWorkerResult(BaseWorkerResult):
 
 
 class EventProcessWorker(
-    BaseWorker[EventProcessJobConfiguration, EventProcessVariables, EventProcessWorkerResult]
+    BaseWorker[
+        EventProcessJobConfiguration, EventProcessVariables, EventProcessWorkerResult
+    ]
 ):
     type = "event_process"
     job_configuration: type[EventProcessJobConfiguration] = EventProcessJobConfiguration
-    job_configuration_variables: type[EventProcessVariables] | None = EventProcessVariables
+    job_configuration_variables: type[EventProcessVariables] | None = (
+        EventProcessVariables
+    )
 
     _description = (
         "Execute flow runs as subprocesses on a worker. Works well for local execution"
@@ -188,7 +190,6 @@ class EventProcessWorker(
                     self._started_event = await self._emit_worker_started_event()
 
                     start_client_metrics_server()
-
 
                     if with_healthcheck:
                         from prefect.workers.server import build_healthcheck_server
@@ -260,7 +261,9 @@ class EventProcessWorker(
         if process is None or status_code is None:
             raise RuntimeError("Failed to start flow run process.")
 
-        return EventProcessWorkerResult(status_code=status_code, identifier=str(process.pid))
+        return EventProcessWorkerResult(
+            status_code=status_code, identifier=str(process.pid)
+        )
 
     async def _submit_adhoc_run(
         self,
@@ -325,12 +328,12 @@ class EventProcessWorker(
     async def _process_event(self, event) -> None:
         """Process a single event with error handling, concurrency limiting, and deduplication"""
         event_id = str(event.id)
-        
+
         # Check for duplicate events (handles worker restarts)
         if self._is_event_processed(event_id):
             self._logger.debug(f"Skipping duplicate event: {event_id}")
             return
-        
+
         try:
             # Acquire a token from the limiter to control concurrency
             if self._limiter:
@@ -338,16 +341,22 @@ class EventProcessWorker(
                     await self._process_event_internal(event)
             else:
                 await self._process_event_internal(event)
-            
+
             # Mark event as processed only after successful processing
             self._mark_event_processed(event_id)
-            
+
         except Exception as e:
-            self._logger.error(f"Failed to process event {event.resource.id}: {e}", exc_info=True)
+            self._logger.error(
+                f"Failed to process event {event.resource.id}: {e}", exc_info=True
+            )
 
     async def _subscribe_to_flow_run_events(self) -> None:
         filter = EventFilter(
-            event=EventNameFilter(prefix=[f"{self._work_pool_name}.{'.'.join(self._work_queues)}.run.deployment"]),
+            event=EventNameFilter(
+                prefix=[
+                    f"{self._work_pool_name}.{'.'.join(self._work_queues)}.run.deployment"
+                ]
+            ),
         )
 
         async with PrefectEventSubscriber(filter=filter) as subscriber:
@@ -355,20 +364,13 @@ class EventProcessWorker(
             async with anyio.create_task_group() as events_task_group:
                 async for event in subscriber:
                     self._logger.info(f"Received event: {event}")
-                    
+
                     # Add event processing task to the persistent task group
-                    events_task_group.start_soon(
-                        self._process_event,
-                        event
-                    )
+                    events_task_group.start_soon(self._process_event, event)
 
     async def _process_event_internal(self, event) -> None:
         """Internal event processing logic"""
-        deployment_id = uuid.UUID(
-            event.resource.id.replace(
-                "deployment.", ""
-            )
-        )
+        deployment_id = uuid.UUID(event.resource.id.replace("deployment.", ""))
         parameters = event.payload.get("parameters", {})
         job_variables = event.payload.get("job_variables", {})
 
@@ -381,14 +383,15 @@ class EventProcessWorker(
         if deployment.entrypoint:
             # we should not accept a placeholder flow at runtime
             try:
-                flow = load_flow_from_entrypoint(deployment.entrypoint, use_placeholder_flow=False)
+                flow = load_flow_from_entrypoint(
+                    deployment.entrypoint, use_placeholder_flow=False
+                )
             except MissingFlowError:
                 flow = load_function_and_convert_to_flow(deployment.entrypoint)
         else:
             raise ValueError(f"Deployment {deployment.id} does not have an entrypoint")
 
         return flow
-
 
     async def __aenter__(self) -> EventProcessWorker:
         await super().__aenter__()
