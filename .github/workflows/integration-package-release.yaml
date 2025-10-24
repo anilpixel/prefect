@@ -73,9 +73,11 @@ jobs:
 
       - name: Build a binary wheel and a source tarball
         run: |
-          python -m build --wheel
-          python -m build --sdist
+          SETUPTOOLS_SCM_VERSION=${{ steps.package_version.outputs.PACKAGE_VERSION }} python -m build --wheel
+          SETUPTOOLS_SCM_VERSION=${{ steps.package_version.outputs.PACKAGE_VERSION }} python -m build --sdist
         working-directory: src/integrations/${{ steps.package_name.outputs.PACKAGE_NAME }}
+        env:
+          SETUPTOOLS_SCM_VERSION: ${{ steps.package_version.outputs.PACKAGE_VERSION }}
 
       - name: Publish build artifacts
         uses: actions/upload-artifact@v4
