@@ -1,5 +1,5 @@
 """
-Module containing the Event Worker used for executing flow runs as subprocesses.
+Module containing the Event Worker used for executing flow runs directly in the worker process.
 
 To start a Event Worker, run the following command:
 
@@ -10,6 +10,7 @@ prefect worker start --pool 'my-work-pool' --type event-process
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import tempfile
@@ -29,6 +30,7 @@ from prefect.client.schemas.objects import Flow as APIFlow
 from prefect.events.clients import PrefectEventSubscriber
 from prefect.events.filters import EventFilter, EventNameFilter
 from prefect.exceptions import MissingFlowError
+from prefect.flow_engine import run_flow
 from prefect.flows import load_flow_from_entrypoint, load_function_and_convert_to_flow
 from prefect.runner.runner import Runner
 from prefect.settings import PREFECT_WORKER_QUERY_SECONDS
@@ -95,7 +97,7 @@ class EventProcessVariables(BaseVariables):
     stream_output: bool = Field(
         default=True,
         description=(
-            "If enabled, workers will stream output from flow run processes to "
+            "If enabled, workers will stream output from flow runs to "
             "local standard output."
         ),
     )
@@ -103,15 +105,14 @@ class EventProcessVariables(BaseVariables):
         default=None,
         title="Working Directory",
         description=(
-            "If provided, workers will open flow run processes within the "
-            "specified path as the working directory. Otherwise, a temporary "
-            "directory will be created."
+            "If provided, workers will execute flows within the "
+            "specified path as the working directory."
         ),
     )
 
 
 class EventProcessWorkerResult(BaseWorkerResult):
-    """Contains information about the final state of a completed process"""
+    """Contains information about the final state of a completed flow execution"""
 
 
 class EventProcessWorker(
@@ -126,8 +127,8 @@ class EventProcessWorker(
     )
 
     _description = (
-        "Execute flow runs as subprocesses on a worker. Works well for local execution"
-        " when first getting started."
+        "Execute flow runs directly in the worker process for high performance. "
+        "Ideal for local execution and event-driven workflows."
     )
     _display_name = "Event Process"
     _documentation_url = "https://docs.prefect.io/latest/get-started/quickstart"
@@ -272,50 +273,60 @@ class EventProcessWorker(
         job_variables: dict[str, Any] | None = None,
         task_status: anyio.abc.TaskStatus["FlowRun"] | None = None,
     ):
-        from prefect._experimental.bundles import (
-            create_bundle_for_flow_run,
-        )
-
         flow_run = await self.client.create_flow_run(
             flow,
             parameters=parameters,
             state=Pending(),
             job_variables=job_variables,
             work_pool_name=self.work_pool.name,
+            work_queue_name=self._work_queues.pop() if self._work_queues else None,
         )
         if task_status is not None:
             # Emit the flow run object to .submit to allow it to return a future as soon as possible
             task_status.started(flow_run)
 
-        api_flow = APIFlow(id=flow_run.flow_id, name=flow.name, labels={})
         logger = self.get_flow_run_logger(flow_run)
+        logger.debug("Executing flow directly in current process...")
 
-        configuration = await self.job_configuration.from_template_and_values(
-            base_job_template=self.work_pool.base_job_template,
-            values=job_variables or {},
-            client=self._client,
-        )
-        configuration.prepare_for_flow_run(
-            flow_run=flow_run,
-            flow=api_flow,
-            work_pool=self.work_pool,
-            worker_name=self.name,
-        )
-
-        bundle = create_bundle_for_flow_run(flow=flow, flow_run=flow_run)
-
-        logger.debug("Executing flow run bundle in subprocess...")
         try:
-            await self._runner.execute_bundle(
-                bundle=bundle,
-                cwd=configuration.working_dir,
-                env=configuration.env,
+            await self._execute_flow_directly(
+                flow=flow,
+                flow_run=flow_run,
+                parameters=parameters,
             )
         except Exception:
-            logger.exception("Error executing flow run bundle in subprocess")
+            logger.exception("Error executing flow directly")
             await self._propose_crashed_state(flow_run, "Flow run execution failed")
         finally:
-            logger.debug("Flow run bundle execution complete")
+            logger.debug("Direct flow execution complete")
+
+    async def _execute_flow_directly(
+        self,
+        flow: "Flow[..., FR]",
+        flow_run: "FlowRun",
+        parameters: dict[str, Any] | None = None,
+    ) -> None:
+        logger = self.get_flow_run_logger(flow_run)
+        logger.debug("Executing flow directly in current process...")
+
+        try:
+            maybe_coro = run_flow(
+                flow=flow,
+                flow_run=flow_run,
+                parameters=parameters,
+            )
+
+            if asyncio.iscoroutine(maybe_coro):
+                await maybe_coro
+            else:
+                pass
+
+        except Exception as e:
+            logger.exception("Error executing flow directly")
+            await self._propose_crashed_state(flow_run, f"Flow execution failed: {e}")
+            raise
+        finally:
+            logger.debug("Direct flow execution complete")
 
     def _is_event_processed(self, event_id: str) -> bool:
         """Check if an event has already been processed using diskcache"""
