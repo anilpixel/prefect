@@ -309,6 +309,18 @@ class EventProcessWorker(
         logger = self.get_flow_run_logger(flow_run)
         logger.debug("Executing flow directly in current process...")
 
+        asyncio.create_task(self._run_flow_async(flow, flow_run, parameters))
+
+        logger.debug("Flow execution task created, running concurrently")
+
+    async def _run_flow_async(
+        self,
+        flow: "Flow[..., FR]",
+        flow_run: "FlowRun",
+        parameters: dict[str, Any] | None = None,
+    ) -> None:
+        logger = self.get_flow_run_logger(flow_run)
+
         try:
             maybe_coro = run_flow(
                 flow=flow,
@@ -322,11 +334,10 @@ class EventProcessWorker(
                 pass
 
         except Exception as e:
-            logger.exception("Error executing flow directly")
+            logger.exception("Error executing flow in background task")
             await self._propose_crashed_state(flow_run, f"Flow execution failed: {e}")
-            raise
         finally:
-            logger.debug("Direct flow execution complete")
+            logger.debug("Background flow execution complete")
 
     def _is_event_processed(self, event_id: str) -> bool:
         """Check if an event has already been processed using diskcache"""
