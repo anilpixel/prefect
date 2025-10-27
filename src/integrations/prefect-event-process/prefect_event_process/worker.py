@@ -279,7 +279,7 @@ class EventProcessWorker(
             state=Pending(),
             job_variables=job_variables,
             work_pool_name=self.work_pool.name,
-            work_queue_name=self._work_queues.pop() if self._work_queues else None,
+            work_queue_name="".join(self._work_queues),
         )
         if task_status is not None:
             # Emit the flow run object to .submit to allow it to return a future as soon as possible
