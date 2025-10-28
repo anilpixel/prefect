@@ -27,6 +27,7 @@ from pydantic import Field, field_validator
 
 from prefect._internal.schemas.validators import validate_working_dir
 from prefect.client.schemas.objects import Flow as APIFlow
+from prefect.events import Event
 from prefect.events.clients import PrefectEventSubscriber
 from prefect.events.filters import EventFilter, EventNameFilter
 from prefect.exceptions import MissingFlowError
@@ -347,7 +348,7 @@ class EventProcessWorker(
         """Mark an event as processed using diskcache (no expiration)"""
         self._event_cache.set(event_id, True)
 
-    async def _process_event(self, event) -> None:
+    async def _process_event(self, event: Event) -> None:
         """Process a single event with error handling, concurrency limiting, and deduplication"""
         event_id = str(event.id)
 
@@ -356,6 +357,9 @@ class EventProcessWorker(
             self._logger.debug(f"Skipping duplicate event: {event_id}")
             return
 
+        # Mark event as processed
+        self._mark_event_processed(event_id)
+
         try:
             # Acquire a token from the limiter to control concurrency
             if self._limiter:
@@ -363,9 +367,6 @@ class EventProcessWorker(
                     await self._process_event_internal(event)
             else:
                 await self._process_event_internal(event)
-
-            # Mark event as processed only after successful processing
-            self._mark_event_processed(event_id)
 
         except Exception as e:
             self._logger.error(
