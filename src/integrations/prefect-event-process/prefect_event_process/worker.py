@@ -289,17 +289,11 @@ class EventProcessWorker(
         logger = self.get_flow_run_logger(flow_run)
         logger.debug("Executing flow directly in current process...")
 
-        try:
-            await self._execute_flow_directly(
-                flow=flow,
-                flow_run=flow_run,
-                parameters=parameters,
-            )
-        except Exception:
-            logger.exception("Error executing flow directly")
-            await self._propose_crashed_state(flow_run, "Flow run execution failed")
-        finally:
-            logger.debug("Direct flow execution complete")
+        return await self._execute_flow_directly(
+            flow=flow,
+            flow_run=flow_run,
+            parameters=parameters,
+        )
 
     async def _execute_flow_directly(
         self,
@@ -344,21 +338,27 @@ class EventProcessWorker(
         """Check if an event has already been processed using diskcache"""
         return event_id in self._event_cache
 
-    def _mark_event_processed(self, event_id: str) -> None:
-        """Mark an event as processed using diskcache (no expiration)"""
-        self._event_cache.set(event_id, True)
+    def _mark_event_processed_atomically(self, event_id: str) -> bool:
+        """
+        Atomically mark an event as processed using diskcache.
+
+        Returns:
+            True if the event was successfully marked (first time processing),
+            False if the event was already marked (duplicate).
+        """
+        # add() is atomic: only sets the key if it doesn't exist
+        # Returns True if key was added, False if key already exists
+        return self._event_cache.add(event_id, True)
 
     async def _process_event(self, event: Event) -> None:
         """Process a single event with error handling, concurrency limiting, and deduplication"""
         event_id = str(event.id)
 
-        # Check for duplicate events (handles worker restarts)
-        if self._is_event_processed(event_id):
+        # Atomically check and mark event as processed in a single operation
+        # This prevents race conditions when multiple tasks process the same event
+        if not self._mark_event_processed_atomically(event_id):
             self._logger.debug(f"Skipping duplicate event: {event_id}")
             return
-
-        # Mark event as processed
-        self._mark_event_processed(event_id)
 
         try:
             # Acquire a token from the limiter to control concurrency
@@ -382,14 +382,50 @@ class EventProcessWorker(
             ),
         )
 
-        async with PrefectEventSubscriber(filter=filter) as subscriber:
-            # Use a persistent task group to concurrently process all events
-            async with anyio.create_task_group() as events_task_group:
-                async for event in subscriber:
-                    self._logger.info(f"Received event: {event}")
+        retry_delays = [1, 2, 5, 10, 30, 60]  # 重连延迟序列（秒）
+        retry_count = 0
 
-                    # Add event processing task to the persistent task group
-                    events_task_group.start_soon(self._process_event, event)
+        while True:
+            try:
+                self._logger.info("正在连接到事件流...")
+                async with PrefectEventSubscriber(filter=filter) as subscriber:
+                    self._logger.info("已成功连接到事件流")
+                    retry_count = 0  # 重置重试计数
+
+                    async with anyio.create_task_group() as events_task_group:
+                        async for event in subscriber:
+                            self._logger.info(f"Received event: {event}")
+
+                            # 将事件处理任务添加到持久化的 task group
+                            events_task_group.start_soon(self._process_event, event)
+
+                # 如果正常退出，退出循环
+                self._logger.info("事件流已正常关闭")
+
+                break
+
+            except asyncio.CancelledError:
+                # Worker 正在关闭，不重试
+                self._logger.info("事件订阅被取消，正在关闭...")
+                break
+
+            except TimeoutError as e:
+                # WebSocket 连接或重连超时（PrefectEventSubscriber 不处理此异常）
+                retry_count += 1
+                delay = retry_delays[min(retry_count - 1, len(retry_delays) - 1)]
+                self._logger.warning(
+                    "事件流连接超时（尝试 #%d）: %s。将在 %d 秒后重试...",
+                    retry_count,
+                    str(e),
+                    delay,
+                )
+                await asyncio.sleep(delay)
+
+            except Exception as e:
+                retry_count += 1
+                delay = retry_delays[min(retry_count - 1, len(retry_delays) - 1)]
+                self._logger.error(f"订阅事件流时发生意外错误: {e}")
+                await asyncio.sleep(delay)
 
     async def _process_event_internal(self, event) -> None:
         """Internal event processing logic"""
